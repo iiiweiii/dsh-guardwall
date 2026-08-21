@@ -186,3 +186,13 @@ chain.key                链密钥（首次生成，0600 权限）
 ## License
 
 MIT
+
+## 批量体检工具
+
+对 awesome-dsh-plugin 高星插件做批量安装前体检（clone + 扫描 + 评分）：
+
+```bash
+node scripts/batch-vet.mjs        # 读 plugins.json，输出 batch-result.jsonl
+```
+
+110 个插件的体检汇总见 [docs/batch-vetting-report.md](docs/batch-vetting-report.md)。

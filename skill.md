@@ -35,3 +35,10 @@
 - 护栏是**协作方**不是敌人：命中告警时要解释清楚，不要假装没发生。
 - 用户明确要求放行的合法操作，放行后照常执行，但要留痕。
 - 本技能不阻止用户主动查看 `guard_status` 或修改策略配置。
+
+## 热加载规则（v0.4）
+
+用户说"加一条规则""改拦截阈值"时：
+- 自定义规则写入 `~/.dsh/cache/dsh-guardwall/rules.d/*.json`（保存即生效）
+- 阈值写入同目录 `config.json`（`{"blockThreshold":6,"warnThreshold":3}`）
+- 用 `guard_reload` 强制刷新，用 `guard_rules` 确认新规则已在生效列表里

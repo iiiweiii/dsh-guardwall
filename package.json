@@ -1,6 +1,6 @@
 {
   "name": "dsh-guardwall",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Security for DeepSeek Harness in two layers: pre-install vetting (permission inventory, static risk scan, A-D trust score, install gate) + runtime guardrail (blocks dangerous tool inputs, audits output leaks, tamper-proof HMAC chained audit logs). Zero runtime deps.",
   "type": "module",
   "main": "index.js",

@@ -19,6 +19,7 @@ import { AuditChain, summarize } from './lib/audit.js'
 import { Policy, blockedResult } from './lib/policy.js'
 import { INPUT_RULES, OUTPUT_RULES, scanArguments, scanOutput } from './lib/rules.js'
 import { vet, gateMessage } from './lib/vet/index.js'
+import { HotLoader } from './lib/hot.js'
 
 export const name = 'dsh-guardwall'
 export const inject = ['tools']
@@ -35,14 +36,25 @@ export function apply(ctx, config = {}) {
   // —— 组装核心模块 ——
   const audit = new AuditChain(cfg.dataDir)
   const policy = new Policy({ blockThreshold: cfg.blockThreshold, warnThreshold: cfg.warnThreshold })
+  // 热加载：rules.d/*.json 自定义规则 + config.json 热阈值（改完秒级生效，不用重启）
+  const hot = new HotLoader(cfg.dataDir, {
+    onReload: ({ config, errors }) => {
+      try {
+        policy.setThresholds(config.blockThreshold, config.warnThreshold)
+      } catch { /* 阈值非法时保持旧值 */ }
+      if (errors.length) log('warn', 'hot-reload partial: ' + errors.join('; '))
+      else log('info', 'hot-reload ok: ' + hot.statusInfo().customRules + ' custom rules')
+    },
+  })
   let ready = false
 
   void (async () => {
     try {
       await audit.init()
       await policy.load({ save: () => policy._state?.save?.() })
+      await hot.init()
       ready = true
-      ctx.logger?.info?.('[dsh-guardwall] ready, audit dir: ' + audit.dir)
+      ctx.logger?.info?.('[dsh-guardwall] ready, audit dir: ' + audit.dir + ' | hot rules: ' + hot.statusInfo().customRules)
     } catch (e) {
       ctx.logger?.warn?.('[dsh-guardwall] init failed: ' + e.message)
     }
@@ -52,11 +64,11 @@ export function apply(ctx, config = {}) {
     try { ctx.logger?.[level]?.('[dsh-guardwall] ' + msg) } catch { /* ignore */ }
   }
 
-  // —— 输入侧拦截（tools/execute）——
+  // —— 输入侧拦截（tools/execute）—— 使用热规则集
   ctx.on('tools/execute', async (exec, next) => {
     if (!ready) return next()
     try {
-      const hits = scanArguments(exec.arguments)
+      const hits = scanArguments(exec.arguments, hot.rules().input)
       if (!hits.length) return next()
       const top = hits[0]
       const action = policy.decide(top.risk, top.id, exec.name)
@@ -85,11 +97,11 @@ export function apply(ctx, config = {}) {
     }
   })
 
-  // —— 输出侧审计（tools/result，只读观察）——
+  // —— 输出侧审计（tools/result，只读观察）—— 使用热规则集
   ctx.on('tools/result', (exec, result) => {
     if (!ready) return
     try {
-      const hits = scanOutput(result)
+      const hits = scanOutput(result, hot.rules().output)
       if (!hits.length) return
       const top = hits[0]
       void audit.append({
@@ -192,6 +204,49 @@ export function apply(ctx, config = {}) {
     },
   })
 
+  // —— 工具：guard_reload / guard_rules（热加载配套）——
+  register({
+    name: 'guard_reload',
+    description:
+      '手动重载 dsh-guardwall 的热加载规则与配置（rules.d/*.json 自定义规则 + config.json 阈值）。' +
+      '当用户说"重新加载规则""应用自定义规则"时调用；文件保存后通常已自动生效，此工具用于强制刷新与查看状态。',
+    parameters: {},
+    output: {
+      schema: { type: 'object' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute() {
+      const r = await hot.reload()
+      await audit.append({
+        action: 'record', rule: 'HOT', risk: 0, tool: 'guard_reload',
+        agent: null, sample: null,
+        detail: { summary: `热重载: ${r.customRules} 条自定义规则${r.errors.length ? '，部分失败' : ''}` },
+      })
+      return { ok: r.ok, errors: r.errors, status: hot.statusInfo(), config: hot.config() }
+    },
+  })
+
+  register({
+    name: 'guard_rules',
+    description:
+      '查看 dsh-guardwall 当前生效的检测规则（内置 + 自定义热加载规则）与热加载状态。' +
+      '当用户问"现在有哪些规则在生效""自定义规则加载了吗"时调用。',
+    parameters: {},
+    output: {
+      schema: { type: 'object' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute() {
+      const rules = hot.rules()
+      return {
+        status: hot.statusInfo(),
+        config: hot.config(),
+        input: rules.input.map((r) => ({ id: r.id, risk: r.risk, summary: r.summary, custom: r.custom || false })),
+        output: rules.output.map((r) => ({ id: r.id, risk: r.risk, summary: r.summary, custom: r.custom || false })),
+      }
+    },
+  })
+
   // —— 审计接口（webServer，参照 dshmarket 验证过的真实 API）——
   try {
     const json = (response, code, data) => {
@@ -236,5 +291,5 @@ export function apply(ctx, config = {}) {
     }
   } catch { /* 路由可选 */ }
 
-  return { audit, policy }
+  return { audit, policy, hot }
 }

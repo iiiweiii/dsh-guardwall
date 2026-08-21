@@ -55,6 +55,23 @@ vision-toolkit@0.1.2     → 57/100 C 级 → WARN
 > 运行时拦截的 7 个都依赖 cordis/dsh-tools（与恶意插件同框架）。本插件零依赖 +
 > 密码学链式审计收据 + 标准 `tools/execute` / `tools/result` 事件接入。
 
+## 热加载（v0.4）· 改规则不用重启
+
+把"经常改的东西"从代码里抽出来，改完**秒级生效**：
+
+- **自定义规则**：`~/.dsh/cache/dsh-guardwall/rules.d/*.json` 放自定义检测规则，保存即生效
+  ```json
+  [
+    { "id": "MY-001", "direction": "input", "risk": 8,
+      "re": "internal\\.corp\\d+\\.com", "summary": "禁止访问内网域名", "advice": "确认授权后访问" }
+  ]
+  ```
+- **热配置**：同目录 `config.json` 改阈值立即生效
+  ```json
+  { "blockThreshold": 6, "warnThreshold": 3 }
+  ```
+- 工具：`guard_reload` 手动刷新 · `guard_rules` 查看生效规则与热加载状态
+
 ## 安装
 
 ```bash

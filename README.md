@@ -58,7 +58,14 @@ vision-toolkit@0.1.2     → 57/100 C 级 → WARN
 ## 安装
 
 ```bash
+# 方式一：npm 发布版（推荐）
 dsh plugin --profile web add dsh-guardwall
+
+# 方式二：GitHub 源码
+dsh plugin --profile web add "github:iiiweiii/dsh-guardwall#main"
+
+# 方式三：CLI 门禁自带（已 clone 仓库时）
+node bin/guardwall.mjs check <spec>
 ```
 
 重启 `dsh web` 后生效。验证：

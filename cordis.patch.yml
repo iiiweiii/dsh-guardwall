@@ -1,0 +1,10 @@
+# dsh-guardwall 挂载层
+# 通过 dsh plugin --profile web add dsh-guardwall 安装（或手动两步安装）。
+- insert:
+    - id: guardwall
+      name: dsh-guardwall
+      # 可选配置（不填用默认）：
+      # config:
+      #   blockThreshold: 7     # risk >= 7 直接拦截
+      #   warnThreshold: 4      # risk >= 4 放行但告警+审计
+      #   dataDir: ~/.dsh/cache/dsh-guardwall

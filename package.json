@@ -11,11 +11,13 @@
     "index.js",
     "lib/",
     "bin/",
-    "assets/",
     "skill.md",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "assets/",
+    "scripts/",
+    "docs/"
   ],
   "keywords": [
     "dsh-plugin",

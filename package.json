@@ -11,6 +11,7 @@
     "index.js",
     "lib/",
     "bin/",
+    "assets/",
     "skill.md",
     "cordis.patch.yml",
     "README.md",

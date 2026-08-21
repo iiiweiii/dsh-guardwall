@@ -1,0 +1,45 @@
+<svg viewBox="0 0 680 420" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>dsh-guardwall 对 awesome-dsh-plugin 前 120 高星插件批量体检结果</title>
+<desc>110 个成功体检：A 级 3 个、B 级 56 个、C 级 48 个、D 级 0 个，中位数 71 分</desc>
+<text x="40" y="34" font-size="15" font-weight="500" fill="#1A1D26" font-family="sans-serif">awesome-dsh-plugin 前 120 高星插件 · 批量体检</text>
+<text x="40" y="54" font-size="12" fill="#5A6072" font-family="sans-serif">成功 110/120（91%）· 分数 52–79 · 中位数 71</text>
+
+<text x="40" y="86" font-size="12" fill="#1A1D26" font-family="sans-serif">A 级 · 高度可信</text>
+<rect x="160" y="74" width="400" height="14" rx="7" fill="#F1EFE8"/>
+<rect x="160" y="74" width="11" height="14" rx="7" fill="#0F6E56"/>
+<text x="572" y="86" font-size="12" font-weight="500" fill="#0F6E56" font-family="monospace">3</text>
+<text x="600" y="86" font-size="11" fill="#5A6072" font-family="sans-serif">2.8%</text>
+
+<text x="40" y="116" font-size="12" fill="#1A1D26" font-family="sans-serif">B 级 · 主流活跃</text>
+<rect x="160" y="104" width="400" height="14" rx="7" fill="#F1EFE8"/>
+<rect x="160" y="104" width="204" height="14" rx="7" fill="#1D9E75"/>
+<text x="572" y="116" font-size="12" font-weight="500" fill="#0F6E56" font-family="monospace">56</text>
+<text x="600" y="116" font-size="11" fill="#5A6072" font-family="sans-serif">52%</text>
+
+<text x="40" y="146" font-size="12" fill="#1A1D26" font-family="sans-serif">C 级 · 建议复核</text>
+<rect x="160" y="134" width="400" height="14" rx="7" fill="#F1EFE8"/>
+<rect x="160" y="134" width="175" height="14" rx="7" fill="#BA7517"/>
+<text x="572" y="146" font-size="12" font-weight="500" fill="#854F0B" font-family="monospace">48</text>
+<text x="600" y="146" font-size="11" fill="#5A6072" font-family="sans-serif">45%</text>
+
+<text x="40" y="176" font-size="12" fill="#1A1D26" font-family="sans-serif">D 级 · 拒绝安装</text>
+<rect x="160" y="164" width="400" height="14" rx="7" fill="#F1EFE8"/>
+<rect x="160" y="164" width="3" height="14" rx="7" fill="#A32D2D"/>
+<text x="572" y="176" font-size="12" font-weight="500" fill="#791F1F" font-family="monospace">0</text>
+<text x="600" y="176" font-size="11" fill="#5A6072" font-family="sans-serif">0%</text>
+
+<text x="40" y="214" font-size="12" font-weight="500" fill="#1A1D26" font-family="sans-serif">A 级插件</text>
+<text x="40" y="232" font-size="12" fill="#3B6D11" font-family="monospace">79  dsh-market</text>
+<text x="240" y="232" font-size="12" fill="#3B6D11" font-family="monospace">79  dsh-plugin-hub</text>
+<text x="440" y="232" font-size="12" fill="#3B6D11" font-family="monospace">78  dsh-deep-whale</text>
+
+<text x="40" y="262" font-size="12" font-weight="500" fill="#1A1D26" font-family="sans-serif">本轮压测验证的能力</text>
+<text x="40" y="282" font-size="12" fill="#5A6072" font-family="sans-serif">· skill 类插件（SKILL.md）识别 + 提示注入检测（INJ-001~005）</text>
+<text x="40" y="300" font-size="12" fill="#5A6072" font-family="sans-serif">· GitHub 元数据注入（repoHint）· 源码未装依赖不误罚</text>
+<text x="40" y="318" font-size="12" fill="#5A6072" font-family="sans-serif">· 12 个插件发现高危权限诉求 · 45 个存在 8+ 级静态发现</text>
+
+<text x="40" y="352" font-size="12" font-weight="500" fill="#1A1D26" font-family="sans-serif">评分标准校准（基于真实分布）</text>
+<text x="40" y="372" font-size="11" fill="#5A6072" font-family="sans-serif">A ≥78 · B 70–77 · C 50–69 · D &lt;50    初版 85/70/50 时 C 级泛滥(72)、D 级误杀知名插件(14)</text>
+<text x="40" y="390" font-size="11" fill="#8A90A3" font-family="sans-serif">数据：batch-result.jsonl（110 条）· 报告：dshguardwall-batch-report.md · 基准 dsh 0.1.0-rc</text>
+<text x="40" y="408" font-size="11" fill="#8A90A3" font-family="sans-serif">守卫价值：装前把关 —— 高危插件拦截在安装之前，运行时再拦一道，全程 HMAC 审计留痕</text>
+</svg>

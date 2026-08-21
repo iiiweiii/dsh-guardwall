@@ -18,6 +18,7 @@
 import { AuditChain, summarize } from './lib/audit.js'
 import { Policy, blockedResult } from './lib/policy.js'
 import { INPUT_RULES, OUTPUT_RULES, scanArguments, scanOutput } from './lib/rules.js'
+import { vet, gateMessage } from './lib/vet/index.js'
 
 export const name = 'dsh-guardwall'
 export const inject = ['tools']
@@ -151,6 +152,46 @@ export function apply(ctx, config = {}) {
     },
   })
 
+  // —— 工具：guard_check（安装前体检）——
+  register({
+    name: 'guard_check',
+    description:
+      '对第三方 DSH 插件做安装前体检：权限清单（文件/命令/网络）、静态风险扫描（危险模式/依赖树）、' +
+      '信任评分（A-D）与门禁建议。当用户想安装新插件、或问"这个插件安不安全""装它有什么权限"时调用。' +
+      '参数 spec 支持：本地路径、npm 包名、github:owner/repo。',
+    parameters: {
+      spec: { type: 'string', description: '插件标识：本地路径 / npm 包名 / github:owner/repo' },
+    },
+    output: {
+      schema: { type: 'object' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    async execute(args) {
+      if (!args?.spec) return { ok: false, error: '需要 spec 参数（本地路径 / npm 包名 / github:owner/repo）' }
+      try {
+        const v = await vet(args.spec)
+        await audit.append({
+          action: 'record', rule: 'VET', risk: 0, tool: 'guard_check',
+          agent: null, sample: args.spec.slice(0, 120),
+          detail: { summary: `体检 ${v.manifest.name} → ${v.score.grade}（${v.score.score}）`, gate: v.gate },
+        })
+        return {
+          ok: true,
+          spec: args.spec,
+          package: v.manifest,
+          gate: v.gate,
+          verdict: gateMessage(v),
+          score: { score: v.score.score, grade: v.score.grade, dimensions: v.score.dimensions },
+          permissions: { maxSeverity: v.permissions.maxSeverity, human: v.permissions.human, files: v.permissions.files.slice(0, 8), commands: v.permissions.commands.slice(0, 8), network: v.permissions.network.slice(0, 8) },
+          staticScan: { findingCount: v.staticScan.findingCount, maxSeverity: v.staticScan.maxSeverity, audit: v.staticScan.audit, topFindings: v.staticScan.findings.slice(0, 10) },
+          sourceFiles: v.sourceFiles,
+        }
+      } catch (e) {
+        return { ok: false, error: e.message }
+      }
+    },
+  })
+
   // —— 审计接口（webServer，参照 dshmarket 验证过的真实 API）——
   try {
     const json = (response, code, data) => {
@@ -166,6 +207,22 @@ export function apply(ctx, config = {}) {
           const records = await audit.readToday()
           const integrity = await audit.verify()
           json(response, 200, { stats: audit.summary(), integrity, recent: records.slice(-20).map(summarize) })
+        },
+      })
+      hostCtx.webServer.register({
+        kind: 'exact',
+        path: '/plugins/dsh-guardwall/vet',
+        handler: async (request, response) => {
+          if (request.method !== 'GET') { response.writeHead(405, { allow: 'GET' }); response.end(); return }
+          try {
+            const url = new URL(request.url, 'http://localhost')
+            const spec = url.searchParams.get('spec')
+            if (!spec) return json(response, 400, { error: 'missing spec' })
+            const v = await vet(spec)
+            json(response, 200, v)
+          } catch (e) {
+            json(response, 400, { error: e.message })
+          }
         },
       })
     }

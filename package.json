@@ -1,12 +1,16 @@
 {
   "name": "dsh-guardwall",
-  "version": "0.1.0",
-  "description": "Runtime security guardrail for DeepSeek Harness: blocks dangerous tool-call inputs (destructive commands, credentials, SSRF, reverse shells), audits output leakage (keys, internal IPs, DB strings), with tamper-proof HMAC chained audit logs. Zero runtime deps.",
+  "version": "0.2.0",
+  "description": "Security for DeepSeek Harness in two layers: pre-install vetting (permission inventory, static risk scan, A-D trust score, install gate) + runtime guardrail (blocks dangerous tool inputs, audits output leaks, tamper-proof HMAC chained audit logs). Zero runtime deps.",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "guardwall": "bin/guardwall.mjs"
+  },
   "files": [
     "index.js",
     "lib/",
+    "bin/",
     "skill.md",
     "cordis.patch.yml",
     "README.md",
@@ -20,7 +24,9 @@
     "audit",
     "tamper-proof",
     "ssrf",
-    "secret-detection"
+    "secret-detection",
+    "plugin-vetting",
+    "trust-score"
   ],
   "license": "MIT",
   "engines": {

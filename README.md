@@ -1,6 +1,37 @@
 # dsh-guardwall
 
-DeepSeek Harness 的**运行时安全护栏** —— 给 Agent 装上边界，而不是事后检查。
+DeepSeek Harness 的安全插件，**安装前体检 + 运行时护栏**双层防线 —— 装前把关、装后看门、全程留痕。
+
+## 第一层 · 安装前体检（v0.2 新增）
+
+**"装这个插件 = 给了它什么权限？"** —— 装之前先回答这个问题：
+
+```bash
+npx guardwall check <spec>              # 只体检输出报告
+npx guardwall add <spec> [--force]      # 体检 → 门禁通过才安装（包装 dsh plugin add）
+# spec：本地路径 / npm 包名 / github:owner/repo
+```
+
+四步体检：
+
+1. **权限清单**：静态分析源码，列出插件会访问的**文件路径**（~/.ssh、.env、云凭据…）、**执行的命令**（rm、curl、sudo…）、**连接的域名**（正常 API / SSRF 元数据 / 遥测端点）
+2. **静态风险扫描**：依赖树 + 危险模式（eval、动态执行、密钥读取、SSRF 目标、无约束递归删除、混淆载荷、安装脚本）
+3. **信任评分 A–D**：维护活跃度（GitHub stars/推送时间）· 代码质量 · 已知漏洞（npm audit）· 来源可信度 · 运行时健康（依赖是否齐全）五维加权
+4. **安装门禁**：D 级拒绝（`--force` 才放行）、C 级警告、A/B 放行
+
+Agent 侧同步提供 `guard_check` 工具——在对话里问"这个插件安全吗"就能拿到体检报告。体检接口：`GET /plugins/dsh-guardwall/vet?spec=<pkg>`。
+
+真实体检演示（本机实测）：
+
+```
+dshmarket@1.10.1         → 67/100 C 级 → WARN
+  权限：常规路径 · 命令执行 · raw.githubusercontent.com（拉插件列表，合理）
+  风险：动态命令拼接若干（它内部 spawn pnpm，符合预期）
+vision-toolkit@0.1.2     → 57/100 C 级 → WARN
+  风险：动态 require/import、动态网络请求、写入未知路径
+```
+
+## 第二层 · 运行时护栏（v0.1）
 
 - **输入侧拦截**：在工具调用执行前扫描参数，命中高危规则（破坏性命令、凭据路径、SSRF 云元数据、反向 shell、命令链注入、提权）**直接拦截**并返回结构化错误
 - **输出侧审计**：监听工具结果，检测密钥/私钥泄露、内网 IP、带口令数据库串、环境变量 dump，记录审计并告警

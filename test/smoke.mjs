@@ -1,5 +1,5 @@
 // dsh-guardwall smoke test —— 验证规则引擎 + 审计链（不依赖 DSH 宿主）
-import { scanArguments, scanOutput, INPUT_RULES, OUTPUT_RULES } from '../lib/rules.js'
+import { scanArguments, scanOutput } from '../lib/rules.js'
 import { AuditChain, summarize } from '../lib/audit.js'
 import { Policy, blockedResult } from '../lib/policy.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -74,6 +74,24 @@ ok(v.ok === false && v.brokenAt === 1, '篡改第 2 条后链完整性失配（b
 const s = summarize(r2)
 ok(typeof s.sample === 'string', 'summarize 输出可读')
 
+const concurrentDir = mkdtempSync(path.join(tmpdir(), 'guardwall-concurrent-'))
+const concurrent = new AuditChain(concurrentDir)
+await concurrent.init()
+await Promise.all(Array.from({ length: 25 }, (_, i) => concurrent.append({
+  action: 'record', rule: 'CONCURRENT', risk: 0, tool: `tool-${i}`,
+})))
+v = await concurrent.verify()
+ok(v.ok === true && v.total === 25, '25 条并发追加保持单一完整链')
+const concurrentFile = path.join(concurrentDir, `audit-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}.jsonl`)
+const concurrentRaw = await fs.readFile(concurrentFile, 'utf8')
+await fs.writeFile(concurrentFile, concurrentRaw.split('\n').slice(0, -2).join('\n') + '\n', 'utf8')
+v = await concurrent.verify()
+ok(v.ok === false && v.reason === 'checkpoint mismatch', '审计尾部截断被 checkpoint 检出')
+let restartRejected = false
+try { await new AuditChain(concurrentDir).init() } catch { restartRejected = true }
+ok(restartRejected, '重启时拒绝接受被截断的审计日志')
+
 rmSync(dir, { recursive: true, force: true })
+rmSync(concurrentDir, { recursive: true, force: true })
 console.log(`\n=== ${pass} passed, ${fail} failed ===`)
 process.exit(fail ? 1 : 0)

@@ -1,11 +1,15 @@
 {
   "name": "dsh-guardwall",
-  "version": "0.4.0",
-  "description": "Security for DeepSeek Harness in two layers: pre-install vetting (permission inventory, static risk scan, A-D trust score, install gate) + runtime guardrail (blocks dangerous tool inputs, audits output leaks, tamper-proof HMAC chained audit logs). Zero runtime deps.",
+  "version": "0.5.0",
+  "description": "Security for DeepSeek Harness in two layers: source-backed pre-install vetting plus fail-closed runtime guardrails and HMAC-chained audit logs. Zero runtime dependencies.",
   "type": "module",
   "main": "index.js",
   "bin": {
     "guardwall": "bin/guardwall.mjs"
+  },
+  "scripts": {
+    "test": "node test/smoke.mjs && node test/hot.mjs && node test/vet.mjs && node test/runtime.mjs",
+    "check": "node --check index.js && node --check lib/audit.js && node --check lib/hot.js && node --check lib/policy.js && node --check lib/rules.js && node --check lib/vet/index.js && node --check lib/vet/npm.js"
   },
   "files": [
     "index.js",
@@ -25,7 +29,7 @@
     "security",
     "guardrail",
     "audit",
-    "tamper-proof",
+    "tamper-evident",
     "ssrf",
     "secret-detection",
     "plugin-vetting",

@@ -1,15 +1,15 @@
-// dsh-guardwall · DeepSeek Harness 运行时安全护栏 + 防篡改审计
+// dsh-guardwall · DeepSeek Harness 运行时安全护栏 + 篡改检测审计
 //
 // 定位：给 Agent 装"护栏"，不是记账本。
 //   输入侧：tools/execute 钩子，扫描工具参数（SEC 规则），命中高危 → 直接拦截
 //   输出侧：tools/result 监听，扫描工具结果（OUT 规则），泄露 → 审计 + 告警
-//   审计：HMAC 链式哈希，任何一条被篡改整条链失配，可证明性审计
+//   审计：HMAC 链式哈希 + checkpoint，内容修改/尾部截断可检测
 //
 // 与社区既有安全插件的差异（调研结论）：
 //   - 44/51 个安全插件是静态扫描（对运行时动态构造的命令全盲）
 //   - 运行时拦截的 7 个依赖 cordis/dsh-tools（与恶意插件同框架）
 //   - 本插件零 npm 依赖（仅 node:crypto/fs/path），自身供应链风险最小
-//   - 密码学链式审计收据（防篡改），合规场景可出示
+//   - 密码学链式审计收据（在 chain.key 未泄露的威胁模型下检测篡改）
 //
 // 兼容性声明：基于 @deepseek-ai/dsh 0.1.0-rc.7（2026-08-19）；
 // 真机验证于 0.1.0-rc.5。tools/execute / tools/result 为宿主标准事件
@@ -17,9 +17,10 @@
 
 import { AuditChain, summarize } from './lib/audit.js'
 import { Policy, blockedResult } from './lib/policy.js'
-import { INPUT_RULES, OUTPUT_RULES, scanArguments, scanOutput } from './lib/rules.js'
+import { scanArguments, scanOutput } from './lib/rules.js'
 import { vet, gateMessage } from './lib/vet/index.js'
 import { HotLoader } from './lib/hot.js'
+import { timingSafeEqual } from 'node:crypto'
 
 export const name = 'dsh-guardwall'
 export const inject = ['tools']
@@ -28,10 +29,18 @@ const DEFAULTS = {
   blockThreshold: 7,
   warnThreshold: 4,
   dataDir: '~/.dsh/cache/dsh-guardwall',
+  failMode: 'closed',
+  allowAgentWhitelist: false,
+  enableHttpApi: false,
+  httpToken: null,
+  allowHttpLocalVet: false,
 }
 
 export function apply(ctx, config = {}) {
   const cfg = { ...DEFAULTS, ...(config || {}) }
+  const log = (level, msg) => {
+    try { ctx.logger?.[level]?.('[dsh-guardwall] ' + msg) } catch { /* ignore */ }
+  }
 
   // —— 组装核心模块 ——
   const audit = new AuditChain(cfg.dataDir)
@@ -47,33 +56,54 @@ export function apply(ctx, config = {}) {
     },
   })
   let ready = false
+  let initError = null
 
-  void (async () => {
-    try {
-      await audit.init()
-      await policy.load({ save: () => policy._state?.save?.() })
-      await hot.init()
-      ready = true
-      ctx.logger?.info?.('[dsh-guardwall] ready, audit dir: ' + audit.dir + ' | hot rules: ' + hot.statusInfo().customRules)
-    } catch (e) {
-      ctx.logger?.warn?.('[dsh-guardwall] init failed: ' + e.message)
-    }
+  const initPromise = (async () => {
+    await audit.init()
+    // Whitelists are intentionally process-local until the host provides an
+    // approval-bound state store; persisting an Agent-granted bypass is unsafe.
+    await policy.load(null)
+    await hot.init()
+    ready = true
+    log('info', 'ready, audit dir: ' + audit.dir + ' | hot rules: ' + hot.statusInfo().customRules)
   })()
+  void initPromise.catch((e) => {
+    initError = e
+    log('warn', 'init failed: ' + e.message)
+  })
 
-  const log = (level, msg) => {
-    try { ctx.logger?.[level]?.('[dsh-guardwall] ' + msg) } catch { /* ignore */ }
+  const appendAudit = async (entry) => {
+    try {
+      await audit.append(entry)
+      return true
+    } catch (e) {
+      log('warn', 'audit write failed: ' + e.message)
+      return false
+    }
   }
+
+  const unavailable = (reason) => blockedResult({
+    id: 'GUARD-UNAVAILABLE', risk: 10,
+    summary: '安全护栏未就绪，已按 fail-closed 策略拒绝执行',
+    advice: reason || '检查 dsh-guardwall 日志与数据目录权限后重试',
+  })
 
   // —— 输入侧拦截（tools/execute）—— 使用热规则集
   ctx.on('tools/execute', async (exec, next) => {
-    if (!ready) return next()
+    if (!ready) {
+      try { await initPromise } catch { /* handled below */ }
+      if (!ready) {
+        if (cfg.failMode === 'open') return next()
+        return unavailable(initError?.message)
+      }
+    }
     try {
       const hits = scanArguments(exec.arguments, hot.rules().input)
       if (!hits.length) return next()
       const top = hits[0]
       const action = policy.decide(top.risk, top.id, exec.name)
       if (action === 'block') {
-        await audit.append({
+        await appendAudit({
           action, rule: top.id, risk: top.risk, tool: exec.name,
           agent: exec.agent?.id ?? null,
           sample: top.sample,
@@ -83,7 +113,7 @@ export function apply(ctx, config = {}) {
         return blockedResult(top)
       }
       // warn / record：放行但审计
-      await audit.append({
+      await appendAudit({
         action, rule: top.id, risk: top.risk, tool: exec.name,
         agent: exec.agent?.id ?? null,
         sample: top.sample,
@@ -93,7 +123,7 @@ export function apply(ctx, config = {}) {
       return next()
     } catch (e) {
       log('warn', 'input-scan error: ' + e.message)
-      return next()
+      return cfg.failMode === 'open' ? next() : unavailable(e.message)
     }
   })
 
@@ -104,12 +134,13 @@ export function apply(ctx, config = {}) {
       const hits = scanOutput(result, hot.rules().output)
       if (!hits.length) return
       const top = hits[0]
-      void audit.append({
+      void appendAudit({
         action: 'warn', rule: top.id, risk: top.risk, tool: exec.name,
         agent: exec.agent?.id ?? null,
         sample: top.sample,
         detail: { summary: top.summary, hits: hits.map((h) => h.id) },
-      }).then(() => {
+      }).then((written) => {
+        if (!written) return
         log('warn', `OUT ${exec.name} → ${top.id} (${top.summary})`)
       })
     } catch (e) { /* 审计失败不影响结果 */ }
@@ -124,7 +155,7 @@ export function apply(ctx, config = {}) {
     name: 'guard_status',
     description:
       '查看 dsh-guardwall 安全护栏状态：今日拦截/告警/记录统计、最近审计事件、' +
-      '审计链完整性校验（防篡改证明）、当前白名单。当用户问"安全护栏运行得怎么样""拦截了什么"时调用。',
+      '审计链完整性校验（篡改/截断检测）、当前白名单。当用户问"安全护栏运行得怎么样""拦截了什么"时调用。',
     parameters: {},
     output: {
       schema: { type: 'object' },
@@ -147,20 +178,36 @@ export function apply(ctx, config = {}) {
     name: 'guard_whitelist',
     description:
       '临时放行 dsh-guardwall 的某条规则（如 SEC-002）对某个工具（如 read_file）的拦截。' +
-      '当用户明确确认某次拦截是误报、需要放行时调用。tool 可用 * 匹配全部工具。',
+      '默认关闭，只有管理员显式开启后才能调用；每次只能放行一个精确工具名。',
     parameters: {
       rule: { type: 'string', description: '规则 ID，如 SEC-002（用 guard_status 查看）' },
-      tool: { type: 'string', default: '*', description: '工具名模式，* 匹配全部' },
-      minutes: { type: 'number', default: 30, description: '放行时长（分钟）' },
+      tool: { type: 'string', description: '精确工具名，不允许 *' },
+      minutes: { type: 'number', default: 30, description: '放行时长（1-60 分钟）' },
     },
     output: {
       schema: { type: 'object' },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args) {
+      if (!cfg.allowAgentWhitelist) {
+        return { ok: false, error: 'Agent 白名单默认关闭；需由管理员在插件配置中显式启用 allowAgentWhitelist' }
+      }
       if (!args?.rule) return { ok: false, error: '需要 rule 参数' }
-      await policy.whitelistRule(args.rule, args.tool || '*', args.minutes || 30)
-      return { ok: true, added: { rule: args.rule, tool: args.tool || '*', minutes: args.minutes || 30 }, whitelist: policy.listWhitelist() }
+      const tool = args.tool
+      const minutes = args.minutes ?? 30
+      const rule = hot.rules().input.find((item) => item.id === args.rule)
+      if (!rule) return { ok: false, error: '未知或非输入侧规则: ' + args.rule }
+      try {
+        await policy.whitelistRule(args.rule, tool, minutes)
+      } catch (e) {
+        return { ok: false, error: e.message }
+      }
+      await appendAudit({
+        action: 'record', rule: 'WHITELIST', risk: rule.risk, tool,
+        agent: null, sample: null,
+        detail: { summary: `临时放行 ${args.rule} 对 ${tool} ${minutes} 分钟` },
+      })
+      return { ok: true, added: { rule: args.rule, tool, minutes }, whitelist: policy.listWhitelist() }
     },
   })
 
@@ -247,17 +294,25 @@ export function apply(ctx, config = {}) {
     },
   })
 
-  // —— 审计接口（webServer，参照 dshmarket 验证过的真实 API）——
-  try {
+  // —— 可选 HTTP 接口：默认关闭，启用时必须配置 bearer token ——
+  if (cfg.enableHttpApi && cfg.httpToken) try {
     const json = (response, code, data) => {
       response.writeHead(code, { 'content-type': 'application/json; charset=utf-8' })
       response.end(JSON.stringify(data))
+    }
+    const authorized = (request) => {
+      const supplied = String(request.headers?.authorization || '').replace(/^Bearer\s+/i, '')
+      const expected = String(cfg.httpToken)
+      const a = Buffer.from(supplied)
+      const b = Buffer.from(expected)
+      return a.length === b.length && timingSafeEqual(a, b)
     }
     const registerRoute = (hostCtx) => {
       hostCtx.webServer.register({
         kind: 'exact',
         path: '/plugins/dsh-guardwall/audit',
         handler: async (request, response) => {
+          if (!authorized(request)) return json(response, 401, { error: 'unauthorized' })
           if (request.method !== 'GET') { response.writeHead(405, { allow: 'GET' }); response.end(); return }
           const records = await audit.readToday()
           const integrity = await audit.verify()
@@ -268,11 +323,15 @@ export function apply(ctx, config = {}) {
         kind: 'exact',
         path: '/plugins/dsh-guardwall/vet',
         handler: async (request, response) => {
+          if (!authorized(request)) return json(response, 401, { error: 'unauthorized' })
           if (request.method !== 'GET') { response.writeHead(405, { allow: 'GET' }); response.end(); return }
           try {
             const url = new URL(request.url, 'http://localhost')
             const spec = url.searchParams.get('spec')
             if (!spec) return json(response, 400, { error: 'missing spec' })
+            if (!cfg.allowHttpLocalVet && (/^(?:\.|\/|~)/.test(spec) || /^[A-Za-z]:[\\/]/.test(spec))) {
+              return json(response, 403, { error: 'local path vetting is disabled over HTTP' })
+            }
             const v = await vet(spec)
             json(response, 200, v)
           } catch (e) {
@@ -286,10 +345,18 @@ export function apply(ctx, config = {}) {
     } else {
       ctx.webServer?.register?.({
         kind: 'exact', path: '/plugins/dsh-guardwall/audit',
-        handler: async (request, response) => json(response, 200, { stats: audit.summary() }),
+        handler: async (request, response) => {
+          if (!authorized(request)) return json(response, 401, { error: 'unauthorized' })
+          return json(response, 200, { stats: audit.summary() })
+        },
       })
     }
-  } catch { /* 路由可选 */ }
+  } catch (e) {
+    log('warn', 'HTTP API registration failed: ' + e.message)
+  }
+  else if (cfg.enableHttpApi) {
+    log('warn', 'HTTP API not registered: httpToken is required')
+  }
 
   return { audit, policy, hot }
 }

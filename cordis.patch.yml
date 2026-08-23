@@ -8,3 +8,5 @@
       #   blockThreshold: 7     # risk >= 7 直接拦截
       #   warnThreshold: 4      # risk >= 4 放行但告警+审计
       #   dataDir: ~/.dsh/cache/dsh-guardwall
+      #   failMode: closed      # 护栏异常时默认拒绝执行
+      #   allowAgentWhitelist: false

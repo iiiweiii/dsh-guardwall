@@ -5,7 +5,7 @@ DeepSeek Harness 的安全插件：**安装前体检 + 运行时护栏**，装�
 - **安装前体检**：权限清单 · 静态风险扫描 · A–D 信任评分 · 安装门禁（D 级拒绝）
 - **运行时拦截**：危险工具调用直接拦截（破坏性命令、凭据、SSRF、反向 shell）
 - **输出审计**：密钥/内网 IP/数据库串泄露检测
-- **防篡改审计**：HMAC 链式哈希，篡改即暴露
+- **篡改检测审计**：HMAC 链式哈希 + 尾部 checkpoint，内容修改与日志截断可检测
 - **热加载**：自定义规则与阈值改完秒级生效，不用重启
 - **零运行时依赖**：仅 Node 内置模块，自身无供应链风险
 
@@ -35,12 +35,12 @@ npx guardwall add <spec> [--force]      # 体检 → 门禁通过才安装
 
 四步体检：
 
-1. **权限清单** —— 静态分析源码，列出插件访问的**文件路径**（~/.ssh、.env、云凭据）、**执行的命令**（rm、curl、sudo）、**连接的域名**（正常 API / SSRF 元数据 / 遥测端点）
-2. **静态风险扫描** —— 依赖树 + 危险模式（eval、动态执行、密钥读取、SSRF 目标、无约束递归删除、混淆载荷、安装脚本）
-3. **信任评分 A–D** —— 维护活跃度 · 代码质量 · 已知漏洞（npm audit）· 来源可信度 · 运行时健康，五维加权（阈值：A≥78 / B 70–77 / C 50–69 / D<50）
-4. **安装门禁** —— D 级拒绝（`--force` 放行）、C 级警告、A/B 放行
+1. **真实制品落地** —— npm 包以 `--ignore-scripts` 安装到隔离临时目录，GitHub 引用检出精确 ref；拿不到源码就不做放行结论
+2. **权限清单** —— 静态分析源码，列出插件访问的**文件路径**（~/.ssh、.env、云凭据）、**执行的命令**（rm、curl、sudo）、**连接的域名**（正常 API / SSRF 元数据 / 遥测端点）
+3. **静态风险扫描** —— 依赖树 + 危险模式（eval、动态执行、密钥读取、SSRF 目标、无约束递归删除、混淆载荷、安装脚本）
+4. **信任评分与门禁** —— 五维评分；D 级拒绝（`--force` 放行）、C 级警告、A/B 放行
 
-对话里问 Agent"这个插件安全吗"会调用 `guard_check` 工具；接口：`GET /plugins/dsh-guardwall/vet?spec=<pkg>`。
+对话里问 Agent"这个插件安全吗"会调用 `guard_check` 工具。HTTP 接口默认关闭，见下方安全配置。
 
 ### 批量压测：前 120 高星插件
 
@@ -62,7 +62,7 @@ Agent 被诱导执行 `rm -rf /` 时，调用被替换为：
 Error: dsh-guardwall 拦截了该调用（规则 SEC-001 · 风险 10/10）
 原因：破坏性删除/格式化/磁盘写入
 建议：禁止对根目录/家目录/系统盘执行删除或格式化；如确需清理，改用回收站或限定路径后二次确认
-如需放行，请用户明确确认后调用 guard_whitelist 临时放行（或调整策略阈值）。
+如需放行，请管理员显式启用 Agent 白名单，并限定规则、精确工具名与有效期。
 ```
 
 > 与社区安全插件的差异：44/51 个是静态扫描（对运行时动态构造的命令全盲）；运行时拦截的 7 个依赖
@@ -119,6 +119,8 @@ Error: dsh-guardwall 拦截了该调用（规则 SEC-001 · 风险 10/10）
         blockThreshold: 7
         warnThreshold: 4
         dataDir: ~/.dsh/cache/dsh-guardwall
+        failMode: closed             # 护栏初始化/扫描异常时拒绝执行
+        allowAgentWhitelist: false   # 默认禁止 Agent 自助放行
 ```
 
 ## 工具
@@ -127,17 +129,17 @@ Error: dsh-guardwall 拦截了该调用（规则 SEC-001 · 风险 10/10）
 |---|---|
 | `guard_check` | 安装前体检（权限/风险/评分/门禁建议） |
 | `guard_status` | 拦截/告警/记录统计、审计链完整性、白名单 |
-| `guard_whitelist` | 临时放行某规则（rule + tool + 分钟数） |
+| `guard_whitelist` | 临时放行某规则；默认关闭，只接受精确工具名和 1–60 分钟 |
 | `guard_reload` | 手动重载热加载规则与配置 |
 | `guard_rules` | 查看生效规则与热加载状态 |
 
-审计接口：`GET /plugins/dsh-guardwall/audit`；体检接口：`GET /plugins/dsh-guardwall/vet?spec=<pkg>`。
+HTTP 接口默认不注册。如确需使用，配置 `enableHttpApi: true` 与非空 `httpToken`，请求携带 `Authorization: Bearer <token>`；HTTP 体检默认禁止本地路径，可由 `allowHttpLocalVet` 显式开启。
 
 ## 审计
 
 数据落在 `~/.dsh/cache/dsh-guardwall/`：`audit-YYYY-MM-DD.jsonl`（每条含 prevHash + HMAC hash）、
-`chain.key`（链密钥，0600 权限）。任何一条被篡改 → `verify()` 返回 `{ok:false, brokenAt:n}`。
-本地读写、无网络调用、无遥测；拦截只影响工具调用结果，不修改宿主配置。
+`checkpoint-YYYY-MM-DD.json`（尾部锚点）、`chain.key`（链密钥，0600 权限）。内容修改、并发链分叉或尾部截断会让 `verify()` 返回失败。
+该机制用于检测意外损坏和未持有密钥的修改；与 Agent 插件同一 OS 用户、可读取 `chain.key` 的攻击者不在其不可伪造威胁模型内。本地读写、无遥测；安装前体检仅为获取 npm/GitHub 制品而联网。
 
 ## 兼容性
 
